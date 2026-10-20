@@ -143,6 +143,101 @@ class MainActivity : FlutterActivity() {
                         result.error("SCAN_ERROR", e.message, null)
                     }
                 }
+                "getDeviceAudios" -> {
+                    CoroutineScope(Dispatchers.IO).launch {
+                        try {
+                            val audioList = mutableListOf<Map<String, Any?>>()
+                            val seenPaths = HashSet<String>()
+
+                            val projection = arrayOf(
+                                MediaStore.Audio.Media._ID,
+                                MediaStore.Audio.Media.TITLE,
+                                MediaStore.Audio.Media.ARTIST,
+                                MediaStore.Audio.Media.ALBUM,
+                                MediaStore.Audio.Media.DURATION,
+                                MediaStore.Audio.Media.DATA,
+                                MediaStore.Audio.Media.SIZE,
+                                MediaStore.Audio.Media.DATE_ADDED
+                            )
+                            val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0 OR ${MediaStore.Audio.Media.MIME_TYPE} = 'audio/mpeg' OR ${MediaStore.Audio.Media.MIME_TYPE} = 'audio/mp4' OR ${MediaStore.Audio.Media.MIME_TYPE} = 'audio/m4a' OR ${MediaStore.Audio.Media.MIME_TYPE} = 'audio/flac' OR ${MediaStore.Audio.Media.MIME_TYPE} = 'audio/x-wav' OR ${MediaStore.Audio.Media.MIME_TYPE} = 'audio/ogg'"
+                            val sortOrder = "${MediaStore.Audio.Media.DATE_ADDED} DESC"
+
+                            contentResolver.query(
+                                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                                projection,
+                                selection,
+                                null,
+                                sortOrder
+                            )?.use { cursor ->
+                                val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+                                val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
+                                val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
+                                val albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
+                                val durationCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+                                val dataCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
+                                val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
+                                val dateAddedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
+
+                                while (cursor.moveToNext()) {
+                                    val path = cursor.getString(dataCol) ?: ""
+                                    if (path.isNotEmpty() && File(path).exists()) {
+                                        seenPaths.add(path)
+                                        val item = mapOf(
+                                            "id" to cursor.getLong(idCol),
+                                            "title" to (cursor.getString(titleCol) ?: File(path).nameWithoutExtension),
+                                            "artist" to (cursor.getString(artistCol) ?: "Unknown Artist"),
+                                            "album" to (cursor.getString(albumCol) ?: ""),
+                                            "durationMs" to cursor.getLong(durationCol),
+                                            "path" to path,
+                                            "sizeBytes" to cursor.getLong(sizeCol),
+                                            "dateAdded" to cursor.getLong(dateAddedCol)
+                                        )
+                                        audioList.add(item)
+                                    }
+                                }
+                            }
+
+                            // Also scan /storage/emulated/0/Download & /storage/emulated/0/Music in case any audio file wasn't indexed yet
+                            val directoriesToScan = listOf(
+                                File("/storage/emulated/0/Download"),
+                                File("/storage/emulated/0/Music")
+                            )
+                            val audioExtensions = setOf("mp3", "m4a", "wav", "aac", "flac", "ogg", "opus")
+
+                            for (dir in directoriesToScan) {
+                                if (dir.exists() && dir.isDirectory) {
+                                    val files = dir.listFiles() ?: emptyArray()
+                                    for (file in files) {
+                                        if (file.isFile && audioExtensions.contains(file.extension.lowercase())) {
+                                            if (!seenPaths.contains(file.absolutePath)) {
+                                                seenPaths.add(file.absolutePath)
+                                                val item = mapOf(
+                                                    "id" to System.currentTimeMillis() + file.hashCode(),
+                                                    "title" to file.nameWithoutExtension,
+                                                    "artist" to "Unknown Artist",
+                                                    "album" to dir.name,
+                                                    "durationMs" to 0L,
+                                                    "path" to file.absolutePath,
+                                                    "sizeBytes" to file.length(),
+                                                    "dateAdded" to (file.lastModified() / 1000)
+                                                )
+                                                audioList.add(item)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            withContext(Dispatchers.Main) {
+                                result.success(audioList)
+                            }
+                        } catch (e: Exception) {
+                            withContext(Dispatchers.Main) {
+                                result.error("QUERY_ERROR", e.message, null)
+                            }
+                        }
+                    }
+                }
                 else -> result.notImplemented()
             }
         }

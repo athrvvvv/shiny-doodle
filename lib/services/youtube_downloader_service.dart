@@ -8,6 +8,7 @@ import 'package:ffmpeg_kit_flutter_new_audio/return_code.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../models/download_item.dart';
+import '../models/device_audio_item.dart';
 
 class YouTubeDownloaderService {
   static const MethodChannel _nativeChannel =
@@ -265,6 +266,23 @@ class YouTubeDownloaderService {
     } catch (e) {
       debugPrint('scanExistingDownloads error: $e');
     }
+  }
+
+  /// Fetch all audios present on device
+  Future<List<DeviceAudioItem>> getDeviceAudios() async {
+    if (!Platform.isAndroid) return [];
+    try {
+      await requestStoragePermissions();
+      final res = await _nativeChannel.invokeListMethod<dynamic>('getDeviceAudios');
+      if (res != null) {
+        return res
+            .map((item) => DeviceAudioItem.fromMap(Map<dynamic, dynamic>.from(item)))
+            .toList();
+      }
+    } catch (e) {
+      debugPrint('Error getting device audios: $e');
+    }
+    return [];
   }
 
   void dispose() {}
