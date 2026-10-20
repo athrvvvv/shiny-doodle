@@ -59,6 +59,13 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isProcessing = false;
 
   @override
+  void initState() {
+    super.initState();
+    // Index any previously downloaded songs so they appear in phone's Audio & WhatsApp
+    _downloader.scanExistingDownloads();
+  }
+
+  @override
   void dispose() {
     _urlController.dispose();
     _downloader.dispose();

@@ -174,10 +174,14 @@ class YouTubeDownloaderService {
         counter++;
       }
 
+      final cleanTitle = item.title.replaceAll('"', r'\"');
+      final cleanArtist = item.author.replaceAll('"', r'\"');
+
       final ffmpegCmd =
-          '-y -i "$rawPath" -vn -c:a libmp3lame -b:a 320k '
-          '-metadata title="${item.title.replaceAll('"', r'\"')}" '
-          '-metadata artist="${item.author.replaceAll('"', r'\"')}" '
+          '-y -i "$rawPath" -vn -c:a libmp3lame -b:a 320k -id3v2_version 3 '
+          '-metadata title="$cleanTitle" '
+          '-metadata artist="$cleanArtist" '
+          '-metadata album="Song Downloader" '
           '"$destinationMp3Path"';
 
       final session = await FFmpegKit.execute(ffmpegCmd);
@@ -186,6 +190,18 @@ class YouTubeDownloaderService {
       if (ReturnCode.isSuccess(returnCode)) {
         final mp3File = File(destinationMp3Path);
         final finalSize = await mp3File.length();
+
+        // Register in Android MediaStore & system index immediately
+        try {
+          await _nativeChannel.invokeMethod('scanMediaFile', {
+            'path': destinationMp3Path,
+            'mimeType': 'audio/mpeg',
+            'title': item.title,
+            'artist': item.author,
+          });
+        } catch (e) {
+          debugPrint('Media scan notice: $e');
+        }
 
         item.status = DownloadStatus.completed;
         item.statusMessage = 'Saved as 320k MP3 to Downloads!';
@@ -197,6 +213,16 @@ class YouTubeDownloaderService {
         // Fallback: If FFmpeg encoding returned an error, copy raw audio
         final fallbackPath = '${targetDirectory.path}/$safeTitle.m4a';
         await rawAudioFile.copy(fallbackPath);
+
+        try {
+          await _nativeChannel.invokeMethod('scanMediaFile', {
+            'path': fallbackPath,
+            'mimeType': 'audio/mp4',
+            'title': item.title,
+            'artist': item.author,
+          });
+        } catch (_) {}
+
         item.status = DownloadStatus.completed;
         item.statusMessage = 'Saved audio to Downloads';
         item.progress = 1.0;
@@ -215,6 +241,29 @@ class YouTubeDownloaderService {
           await rawAudioFile.delete();
         } catch (_) {}
       }
+    }
+  }
+
+  /// Scans any existing MP3 files in Downloads so they immediately appear in Audio & WhatsApp
+  Future<void> scanExistingDownloads() async {
+    if (!Platform.isAndroid) return;
+    try {
+      final downloadDir = Directory('/storage/emulated/0/Download');
+      if (await downloadDir.exists()) {
+        final entries = downloadDir.listSync();
+        for (final entity in entries) {
+          if (entity is File && entity.path.toLowerCase().endsWith('.mp3')) {
+            try {
+              await _nativeChannel.invokeMethod('scanMediaFile', {
+                'path': entity.path,
+                'mimeType': 'audio/mpeg',
+              });
+            } catch (_) {}
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('scanExistingDownloads error: $e');
     }
   }
 
